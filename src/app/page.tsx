@@ -1,103 +1,193 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const mapContainer = useRef<HTMLDivElement>(null);
+  const map = useRef<maplibregl.Map | null>(null);
+  const [postcode, setPostcode] = useState("");
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const [selectedLocation, setSelectedLocation] = useState<{
+    postcode: string;
+    coordinates: [number, number] | null;
+  }>({ postcode: "", coordinates: null });
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  useEffect(() => {
+    if (map.current || !mapContainer.current) return;
+
+    console.log("Initializing map...");
+
+    try {
+      map.current = new maplibregl.Map({
+        container: mapContainer.current,
+        style: "https://tiles.openfreemap.org/styles/liberty",
+        center: [-0.1276, 51.5074],
+        zoom: 12,
+        attributionControl: {},
+      });
+
+      map.current.on("load", () => {
+        console.log("Map loaded successfully!");
+        setMapLoaded(true);
+      });
+
+      map.current.on("error", (e) => {
+        console.error("Map error:", e);
+      });
+
+      map.current.addControl(new maplibregl.NavigationControl(), "top-right");
+    } catch (error) {
+      console.error("Failed to initialize map:", error);
+    }
+
+    return () => {
+      if (map.current) {
+        map.current.remove();
+      }
+    };
+  }, []);
+
+  const geocodePostcode = async (postcode: string) => {
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&country=GB&postalcode=${encodeURIComponent(
+          postcode
+        )}&limit=1`
+      );
+      const data = await response.json();
+
+      if (data && data.length > 0) {
+        const lat = parseFloat(data[0].lat);
+        const lng = parseFloat(data[0].lon);
+        return [lng, lat] as [number, number];
+      }
+      return null;
+    } catch (error) {
+      console.error("Geocoding error:", error);
+      return null;
+    }
+  };
+
+  const handleLocationSearch = async () => {
+    if (!postcode.trim() || !map.current) return;
+
+    const coordinates = await geocodePostcode(postcode.trim());
+
+    if (coordinates) {
+      setSelectedLocation({ postcode: postcode.trim(), coordinates });
+
+      map.current.flyTo({
+        center: coordinates,
+        zoom: 15,
+        duration: 1000,
+      });
+
+      const existingMarker = document.querySelector(".location-marker");
+      if (existingMarker) {
+        existingMarker.remove();
+      }
+
+      new maplibregl.Marker({ color: "#ef4444", className: "location-marker" })
+        .setLngLat(coordinates)
+        .addTo(map.current);
+    } else {
+      alert("Postcode not found. Please try again.");
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      handleLocationSearch();
+    }
+  };
+
+  return (
+    <div className="flex h-screen">
+      {/* Left Panel */}
+      <div className="w-[350px] bg-white border-r border-gray-200 flex flex-col">
+        {/* Header */}
+        <div className="p-6 border-b border-gray-100">
+          <h1 className="text-xl font-semibold text-gray-900 mb-2">
+            Property Area Analysis
+          </h1>
+          <p className="text-sm text-gray-600">
+            Enter a postcode to analyze the area
+          </p>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+
+        {/* Location Search */}
+        <div className="p-6 space-y-4">
+          <div>
+            <label
+              htmlFor="postcode"
+              className="block text-sm font-medium text-gray-700 mb-2"
+            >
+              Postcode
+            </label>
+            <div className="flex space-x-2">
+              <input
+                id="postcode"
+                type="text"
+                value={postcode}
+                onChange={(e) => setPostcode(e.target.value.toUpperCase())}
+                placeholder="e.g. SW1A 1AA"
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black"
+              />
+              <button
+                onClick={handleLocationSearch}
+                disabled={!postcode.trim()}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Search
+              </button>
+            </div>
+          </div>
+
+          {/* Selected Location Info */}
+          {selectedLocation.coordinates && (
+            <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+              <h3 className="text-sm font-medium text-gray-900 mb-2">
+                Selected Location
+              </h3>
+              <div className="text-sm text-gray-600">
+                <div>Postcode: {selectedLocation.postcode}</div>
+                <div>
+                  Coordinates: {selectedLocation.coordinates[1].toFixed(4)},{" "}
+                  {selectedLocation.coordinates[0].toFixed(4)}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Placeholder for future controls */}
+        <div className="flex-1 p-6 bg-gray-50">
+          <div className="text-sm text-gray-500">
+            Analysis controls will appear here once a location is selected.
+          </div>
+        </div>
+      </div>
+
+      {/* Map Container */}
+      <div className="flex-1 relative h-screen">
+        <div ref={mapContainer} className="absolute inset-0 w-full h-full" />
+
+        {/* Map overlay info */}
+        <div className="absolute top-4 left-4 bg-white bg-opacity-90 backdrop-blur-sm px-3 py-2 rounded-lg shadow-sm">
+          <div className="text-sm text-gray-700">
+            {mapLoaded
+              ? "Click and drag to explore • Search postcode to analyze"
+              : "Loading map..."}
+          </div>
+          {!mapLoaded && (
+            <div className="text-xs text-gray-500 mt-1">
+              Map status: Initializing...
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
