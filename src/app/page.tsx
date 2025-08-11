@@ -13,6 +13,7 @@ export default function Home() {
     postcode: string;
     coordinates: [number, number] | null;
   }>({ postcode: "", coordinates: null });
+  const [radius, setRadius] = useState(1000); // Default 1km radius in meters
 
   useEffect(() => {
     if (map.current || !mapContainer.current) return;
@@ -31,6 +32,38 @@ export default function Home() {
       map.current.on("load", () => {
         console.log("Map loaded successfully!");
         setMapLoaded(true);
+
+        // Add source for the radius circle
+        map.current?.addSource("radius-circle", {
+          type: "geojson",
+          data: {
+            type: "FeatureCollection",
+            features: [],
+          },
+        });
+
+        // Add layer for the area outside the circle (greyscale overlay)
+        map.current?.addLayer({
+          id: "greyscale-overlay",
+          type: "fill",
+          source: "radius-circle",
+          paint: {
+            "fill-color": "#808080",
+            "fill-opacity": 0.4,
+          },
+        });
+
+        // Add layer for the circle outline
+        map.current?.addLayer({
+          id: "radius-outline",
+          type: "line",
+          source: "radius-circle",
+          paint: {
+            "line-color": "#3b82f6",
+            "line-width": 2,
+            "line-dasharray": [2, 2],
+          },
+        });
       });
 
       map.current.on("error", (e) => {
@@ -48,6 +81,111 @@ export default function Home() {
       }
     };
   }, []);
+
+  // Update the radius circle when location or radius changes
+  useEffect(() => {
+    if (selectedLocation.coordinates && map.current && mapLoaded) {
+      updateRadiusCircle();
+    }
+  }, [selectedLocation.coordinates, radius, mapLoaded]);
+
+  const createCirclePolygon = (
+    center: [number, number],
+    radiusInMeters: number,
+    points: number = 64
+  ) => {
+    const coords = [];
+    const earthRadius = 6371000; // Earth's radius in meters
+
+    for (let i = 0; i < points; i++) {
+      const angle = (i / points) * 2 * Math.PI;
+
+      // Calculate offset in degrees
+      const latOffset = (radiusInMeters / earthRadius) * (180 / Math.PI);
+      const lngOffset =
+        ((radiusInMeters / earthRadius) * (180 / Math.PI)) /
+        Math.cos((center[1] * Math.PI) / 180);
+
+      const lat = center[1] + latOffset * Math.cos(angle);
+      const lng = center[0] + lngOffset * Math.sin(angle);
+
+      coords.push([lng, lat]);
+    }
+    coords.push(coords[0]); // Close the polygon
+
+    return coords;
+  };
+
+  const createInvertedPolygon = (
+    center: [number, number],
+    radiusInMeters: number
+  ) => {
+    const circleCoords = createCirclePolygon(center, radiusInMeters);
+
+    // Create a large outer boundary (world extent)
+    const worldBounds = [
+      [-180, -85],
+      [180, -85],
+      [180, 85],
+      [-180, 85],
+      [-180, -85],
+    ];
+
+    return [worldBounds, circleCoords];
+  };
+
+  const updateRadiusCircle = () => {
+    if (!selectedLocation.coordinates || !map.current) return;
+
+    const invertedCoords = createInvertedPolygon(
+      selectedLocation.coordinates,
+      radius
+    );
+    const circleCoords = createCirclePolygon(
+      selectedLocation.coordinates,
+      radius
+    );
+
+    // Update the source with both the greyscale overlay and circle outline
+    const source = map.current.getSource(
+      "radius-circle"
+    ) as maplibregl.GeoJSONSource;
+    if (source) {
+      source.setData({
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            properties: { type: "overlay" },
+            geometry: {
+              type: "Polygon",
+              coordinates: invertedCoords,
+            },
+          },
+          {
+            type: "Feature",
+            properties: { type: "circle" },
+            geometry: {
+              type: "Polygon",
+              coordinates: [circleCoords],
+            },
+          },
+        ],
+      });
+
+      // Update layer filters to show different features
+      map.current.setFilter("greyscale-overlay", [
+        "==",
+        ["get", "type"],
+        "overlay",
+      ]);
+      map.current.setFilter("radius-outline", [
+        "==",
+        ["get", "type"],
+        "circle",
+      ]);
+    }
+  };
 
   const geocodePostcode = async (postcode: string) => {
     try {
@@ -103,6 +241,13 @@ export default function Home() {
     }
   };
 
+  const formatRadius = (radiusInMeters: number) => {
+    if (radiusInMeters >= 1000) {
+      return `${(radiusInMeters / 1000).toFixed(1)}km`;
+    }
+    return `${radiusInMeters}m`;
+  };
+
   return (
     <div className="flex h-screen">
       {/* Left Panel */}
@@ -132,6 +277,7 @@ export default function Home() {
                 type="text"
                 value={postcode}
                 onChange={(e) => setPostcode(e.target.value.toUpperCase())}
+                onKeyPress={handleKeyPress}
                 placeholder="e.g. SW1A 1AA"
                 className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black"
               />
@@ -145,18 +291,47 @@ export default function Home() {
             </div>
           </div>
 
+          {/* Radius Control */}
+          {selectedLocation.coordinates && (
+            <div className="space-y-4">
+              <div>
+                <label
+                  htmlFor="radius"
+                  className="block text-sm font-medium text-gray-700 mb-2"
+                >
+                  Analysis Radius: {formatRadius(radius)}
+                </label>
+                <input
+                  id="radius"
+                  type="range"
+                  min="100"
+                  max="5000"
+                  step="100"
+                  value={radius}
+                  onChange={(e) => setRadius(parseInt(e.target.value))}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+                />
+                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                  <span>100m</span>
+                  <span>5km</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Selected Location Info */}
           {selectedLocation.coordinates && (
             <div className="mt-6 p-4 bg-gray-50 rounded-lg">
               <h3 className="text-sm font-medium text-gray-900 mb-2">
                 Selected Location
               </h3>
-              <div className="text-sm text-gray-600">
+              <div className="text-sm text-gray-600 space-y-1">
                 <div>Postcode: {selectedLocation.postcode}</div>
                 <div>
                   Coordinates: {selectedLocation.coordinates[1].toFixed(4)},{" "}
                   {selectedLocation.coordinates[0].toFixed(4)}
                 </div>
+                <div>Radius: {formatRadius(radius)}</div>
               </div>
             </div>
           )}
@@ -165,7 +340,9 @@ export default function Home() {
         {/* Placeholder for future controls */}
         <div className="flex-1 p-6 bg-gray-50">
           <div className="text-sm text-gray-500">
-            Analysis controls will appear here once a location is selected.
+            {selectedLocation.coordinates
+              ? "Analysis controls will appear here. Adjust the radius above to focus on different area sizes."
+              : "Analysis controls will appear here once a location is selected."}
           </div>
         </div>
       </div>
@@ -186,8 +363,33 @@ export default function Home() {
               Map status: Initializing...
             </div>
           )}
+          {selectedLocation.coordinates && (
+            <div className="text-xs text-blue-600 mt-1">
+              Analysis area: {formatRadius(radius)} radius
+            </div>
+          )}
         </div>
       </div>
+
+      <style jsx>{`
+        .slider::-webkit-slider-thumb {
+          appearance: none;
+          height: 20px;
+          width: 20px;
+          border-radius: 50%;
+          background: #3b82f6;
+          cursor: pointer;
+        }
+
+        .slider::-moz-range-thumb {
+          height: 20px;
+          width: 20px;
+          border-radius: 50%;
+          background: #3b82f6;
+          cursor: pointer;
+          border: none;
+        }
+      `}</style>
     </div>
   );
 }
