@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@turf/turf": "^7.2.0",
     "@types/maplibre-gl": "^1.13.2",
     "maplibre-gl": "^5.6.2",
     "next": "15.4.6",
